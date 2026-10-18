@@ -63,15 +63,24 @@ class OTELTraceParser:
 
     # Heuristic weights. The maximum possible sum (1.3) exceeds 1.0 on purpose
     # so the score is meaningfully clamped, exercising the safety upper bound.
-    _WEIGHT_EMPTY_COMPLETION = 0.6
+   _WEIGHT_EMPTY_COMPLETION = 0.6
     _WEIGHT_MISSING_CITATION = 0.5
     _WEIGHT_UNKNOWN_MODEL = 0.2
+    _WEIGHT_HEDGING = 0.3
 
     # A completion is considered "ungrounded" when the prompt asks for a source
     # (via one of these cues) yet the completion contains no citation markers.
     _GROUNDING_CUES: tuple[str, ...] = ("according to", "as per", "per the", "cite")
-    _CITATION_MARKERS: tuple[str, ...] = ("[", "]")
-
+    _CITATION_MARKERS: tuple[str, ...] = ("[", "]", "(", ")")
+    _HEDGING_CUES: tuple[str, ...] = (
+        "i am not sure",
+        "i cannot",
+        "as an ai",
+        "it is possible that",
+        "i don't have access",
+        "as far as i know",
+        "i do not have access",
+    )
     @staticmethod
     def _coerce_int(value: Any) -> int:
         """Best-effort conversion of an attribute value to a non-negative int."""
@@ -139,7 +148,13 @@ class OTELTraceParser:
         if model == "unknown-model":
             risk_score += cls._WEIGHT_UNKNOWN_MODEL
             detected_warnings.append("Model identifier missing from span attributes.")
-
+# Heuristic 4: completion contains hedging or refusal language.
+        lowered_completion = completion.lower()
+        if any(cue in lowered_completion for cue in cls._HEDGING_CUES):
+            risk_score += cls._WEIGHT_HEDGING
+            message = "Completion contains hedging or refusal language."
+            detected_warnings.append(message)
+            warnings.warn(message, stacklevel=2)    
         return TraceEvaluationResult(
             model=model,
             input_tokens=input_tokens,
